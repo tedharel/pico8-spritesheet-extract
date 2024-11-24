@@ -35,7 +35,7 @@ namespace P8SpritesheetExtract {
             catch (Exception exception)
             {
                 string message = $"""
-                Error reading spritesheet data: {exception.Message}
+                Error converting spritesheet: {exception.Message}
                 Usage: P8SpritesheetExtract [options] <file> ...
                     -h, --help    show this menu
                 """;
