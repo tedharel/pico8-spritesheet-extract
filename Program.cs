@@ -5,11 +5,68 @@ using SixLabors.ImageSharp.PixelFormats;
 namespace P8SpritesheetExtract {
     class Program {
         static void Main(string[] args) {
-            Config config = new(args);
+            Config config;
 
-            P8GfxData gfxData = new(config.path);
+            try
+            {
+                config = new Config(args);
+            }
+            catch (Exception exception)
+            {
+                string message = $"""
+                Error parsing arguments: {exception.Message}
+                Usage: P8SpritesheetExtract [options] <file> ...
+                    -h, --help    show this menu
+                """;
 
-            Image<Argb32> image = gfxData.ToImage();
+                Console.WriteLine(message);
+                Environment.Exit(1);
+
+                // This shouldn't trigger, but it makes the compiler happy
+                throw new Exception(message);
+            }
+
+            P8GfxData gfxData;
+
+            try
+            {
+                gfxData = new(config.path);
+            }
+            catch (Exception exception)
+            {
+                string message = $"""
+                Error reading spritesheet data: {exception.Message}
+                Usage: P8SpritesheetExtract [options] <file> ...
+                    -h, --help    show this menu
+                """;
+
+                Console.WriteLine(message);
+                Environment.Exit(1);
+
+                // This shouldn't trigger, but it makes the compiler happy
+                throw new Exception(message);
+            }
+
+            Image<Argb32> image;
+
+            try
+            {
+                image = gfxData.ToImage();
+            }
+            catch (Exception exception)
+            {
+                string message = $"""
+                Error converting spritesheet data: {exception.Message}
+                Usage: P8SpritesheetExtract [options] <file> ...
+                    -h, --help    show this menu
+                """;
+
+                Console.WriteLine(message);
+                Environment.Exit(1);
+
+                // This shouldn't trigger, but it makes the compiler happy
+                throw new Exception(message);
+            }
 
             image.SaveAsPng($"{config.name}.png");
         }
@@ -20,6 +77,15 @@ namespace P8SpritesheetExtract {
         public readonly string name;
 
         public Config(string[] args) {
+            if (args.Contains("-h") || args.Contains("--help"))
+            {
+                Console.WriteLine("""
+                Usage: P8SpritesheetExtract [options] <file> ...
+                    -h, --help    show this menu
+                """);
+                Environment.Exit(0);
+            }
+
             if (args.Length < 1)
             {
                 throw new Exception("not enough arguments");
@@ -69,7 +135,7 @@ namespace P8SpritesheetExtract {
             }
             else
             {
-                throw new Exception($"Unsupported filename extension: {Path.GetExtension(path)}. Is it a valid pico-8 file?");
+                throw new Exception($"Unsupported filename extension ({Path.GetExtension(path)}). Is it a valid pico-8 file?");
             }
         }
 
