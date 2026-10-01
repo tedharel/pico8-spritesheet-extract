@@ -16,6 +16,9 @@ class Program
                 case Config.ExtractCommand.SpriteSheet:
                     Spritesheet(config);
                     break;
+                case Config.ExtractCommand.Sprites:
+                    Sprites(config);
+                    break;
             }
         }
         catch (P8ExtractException exception)
@@ -30,6 +33,7 @@ class Program
 
             commands:
                 - spritesheet <output_file.png>
+                - sprites <output_folder>
             """);
         }
     }
@@ -65,6 +69,60 @@ class Program
             }
         }
     }
+
+    static void Sprites(Config config)
+    {
+        P8GfxData gfxData = new(config.input_path, config.input_extension);
+        SKBitmap bitmap = gfxData.ToBitmap();
+
+        Trace.Assert(config.output_path != null, "Output path should be set by Config()");
+
+        SKBitmap sprite = new(8, 8, bitmap.ColorType, bitmap.AlphaType);
+
+        for (int i = 0; i < 256; i++)
+        {
+            int y = (i / 16) * 8;
+            int x = (i % 16) * 8;
+            
+            {
+                bool success = bitmap.ExtractSubset(sprite, new SKRectI(x, y, x + 8, y + 8));
+
+                if (!success)
+                {
+                    Console.WriteLine($"{i}: ({x}, {y}) - ({x + 7}, {y + 7})");
+                    Console.WriteLine(new SKRectI(x, y, x + 7, y + 7));
+                    throw new P8ExtractException($"failed to extract sprite {i} from spritesheet");
+                }
+            }
+
+            string path = Path.Join(config.output_path, $"{i}.png");
+
+            try
+            {
+                using (FileStream stream = new(path, FileMode.Create, FileAccess.Write))
+                {
+                    bool success = sprite.Encode(stream, SKEncodedImageFormat.Png, 0);
+
+                    if (!success)
+                    {
+                        throw new P8ExtractException($"failed to encode sprite {i}");
+                    }
+                };
+            }
+            catch (Exception exception)
+            {
+                if (exception is P8ExtractException)
+                {
+                    throw;
+                }
+                else
+                {
+                    throw new P8ExtractException($"failed to save sprite {i} to '{path}', caused by: {exception.Message}");
+                }
+            }
+        }
+
+    }
 }
 
 class Config
@@ -97,6 +155,9 @@ class Config
         {
             case ExtractCommand.SpriteSheet:
                 output_path = ParseSpritesheetArguments(remaining);
+                break;
+            case ExtractCommand.Sprites:
+                output_path = ParseSpritesArguments(remaining);
                 break;
         }
     }
@@ -135,6 +196,7 @@ class Config
         return command.ToLower() switch
         {
             "spritesheet" => ExtractCommand.SpriteSheet,
+            "sprites" => ExtractCommand.Sprites,
             _ => throw new P8ExtractException($"invalid command '{command}'"),
         };
     }
@@ -163,6 +225,30 @@ class Config
         return args[0];
     }
 
+    static string ParseSpritesArguments(string[] args)
+    {
+        if (args.Length < 1)
+        {
+            throw new P8ExtractException("<output_folder> not specified");
+        }
+
+        try
+        {
+            FileInfo _ = new(args[0]);
+        }
+        catch (Exception exception)
+        {
+            throw new P8ExtractException($"invalid output folder path, caused by: {exception.Message}");
+        }
+
+        if (!Path.Exists(args[0]))
+        {
+            throw new P8ExtractException($"couldn't find output folder '{args[0]}'");
+        }
+
+        return args[0];
+    }
+
     public enum P8Extension
     {
         P8,
@@ -172,6 +258,7 @@ class Config
     public enum ExtractCommand
     {
         SpriteSheet,
+        Sprites,
     }
 }
 
