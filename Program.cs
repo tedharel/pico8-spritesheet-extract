@@ -14,19 +14,11 @@ class Program
             switch (config.command)
             {
                 case Config.ExtractCommand.SpriteSheet:
-                    P8GfxData gfxData = new(config.input_path, config.input_extension);
-                    SKBitmap bitmap = gfxData.ToBitmap();
-
-                    Trace.Assert(config.output_path != null, "Output path should be set by Config()");
-
-                    using (FileStream stream = new(config.output_path, FileMode.Create, FileAccess.Write))
-                    {
-                        bitmap.Encode(stream, SKEncodedImageFormat.Png, 0);
-                    };
+                    Spritesheet(config);
                     break;
             }
         }
-        catch (Exception exception)
+        catch (P8ExtractException exception)
         {
             const string red = "\u001b[31m";
             const string reset = "\u001b[0m";
@@ -39,6 +31,38 @@ class Program
             commands:
                 - spritesheet <output_file.png>
             """);
+        }
+    }
+
+    static void Spritesheet(Config config)
+    {
+        P8GfxData gfxData = new(config.input_path, config.input_extension);
+        SKBitmap bitmap = gfxData.ToBitmap();
+
+        Trace.Assert(config.output_path != null, "Output path should be set by Config()");
+
+        try
+        {
+            using (FileStream stream = new(config.output_path, FileMode.Create, FileAccess.Write))
+            {
+                bool success = bitmap.Encode(stream, SKEncodedImageFormat.Png, 0);
+
+                if (!success)
+                {
+                    throw new P8ExtractException("failed to encode spritesheet");
+                }
+            };
+        }
+        catch (Exception exception)
+        {
+            if (exception is P8ExtractException)
+            {
+                throw;
+            }
+            else
+            {
+                throw new P8ExtractException($"failed to save spritesheet to '{config.output_path}', caused by: {exception.Message}");
+            }
         }
     }
 }
@@ -55,14 +79,14 @@ class Config
     {
         if (args.Length < 1)
         {
-            throw new Exception("no arguments specified");
+            throw new P8ExtractException("no arguments specified");
         }
 
         (input_path, input_extension) = ParseInputFilePath(args[0]);
 
         if (args.Length < 2)
         {
-            throw new Exception("command not specified");
+            throw new P8ExtractException("command not specified");
         }
 
         command = ParseCommand(args[1]);
@@ -85,18 +109,7 @@ class Config
         }
         catch (Exception exception)
         {
-            if (
-                exception is ArgumentException ||
-                exception is PathTooLongException ||
-                exception is NotSupportedException
-            )
-            {
-                throw new Exception("invalid input file path");
-            }
-            else
-            {
-                throw;
-            }
+            throw new P8ExtractException($"invalid input file path, caused by: {exception.Message}");
         }
 
         P8Extension extension;
@@ -111,7 +124,7 @@ class Config
         }
         else
         {
-            throw new Exception($"invalid input file extension '{Path.GetExtension(path)}'. This should be either '.p8' or '.p8.png'");
+            throw new P8ExtractException($"invalid input file extension '{Path.GetExtension(path)}'. This should be either '.p8' or '.p8.png'");
         }
 
         return (path, extension);
@@ -122,7 +135,7 @@ class Config
         return command.ToLower() switch
         {
             "spritesheet" => ExtractCommand.SpriteSheet,
-            _ => throw new Exception($"invalid command '{command}'"),
+            _ => throw new P8ExtractException($"invalid command '{command}'"),
         };
     }
 
@@ -130,12 +143,21 @@ class Config
     {
         if (args.Length < 1)
         {
-            throw new Exception("<output_file.png> not specified");
+            throw new P8ExtractException("<output_file.png> not specified");
+        }
+
+        try
+        {
+            FileInfo _ = new(args[0]);
+        }
+        catch (Exception exception)
+        {
+            throw new P8ExtractException($"invalid output file path, caused by: {exception.Message}");
         }
 
         if (Path.GetExtension(args[0]) != ".png")
         {
-            throw new Exception($"invalid output file extension '{Path.GetExtension(args[0])}'. This should be '.png'");
+            throw new P8ExtractException($"invalid output file extension '{Path.GetExtension(args[0])}'. This should be '.png'");
         }
 
         return args[0];
@@ -169,7 +191,17 @@ class P8GfxData
 
     static byte[] P8ReadGfxData(string path)
     {
-        string[] lines = File.ReadAllLines(path);
+        string[] lines;
+
+        try
+        {
+            lines = File.ReadAllLines(path);
+        }
+        catch (Exception exception)
+        {
+            throw new P8ExtractException($"failed to read input file '{path}', caused by: {exception.Message}");
+        }
+
         string[] gfxLines = GfxLinesFromP8Lines(lines);
         return GfxDataFromLines(gfxLines);
     }
@@ -180,7 +212,7 @@ class P8GfxData
 
         if (gfxDataStart == -1)
         {
-            throw new Exception("couldn't find gfx data section. Is the supplied file valid?");
+            throw new P8ExtractException("couldn't find gfx data section. Is the supplied file valid?");
         }
 
         return [.. lines.Skip(gfxDataStart + 1).Take(128)];
@@ -192,7 +224,7 @@ class P8GfxData
 
         if (gfxString.Length != 128 * 128)
         {
-            throw new Exception($"Incorrect amount of GFX data ({gfxString.Length}). Should be {128 * 128}. Is the supplied file valid?");
+            throw new P8ExtractException($"Incorrect amount of GFX data ({gfxString.Length}). Should be {128 * 128}. Is the supplied file valid?");
         }
 
         byte[] gfxData = new byte[gfxString.Length / 2];
@@ -227,11 +259,11 @@ class P8GfxData
 
     static byte[] P8PngReadGfxData(string path)
     {
-        SKBitmap bitmap = SKBitmap.Decode(path);
+        SKBitmap bitmap = SKBitmap.Decode(path) ?? throw new P8ExtractException($"failed to read input file '{path}'");
 
         if (!(bitmap.Width == 160 && bitmap.Height == 205))
         {
-            throw new Exception($"incorrect image dimensions ({bitmap.Width} x {bitmap.Height}). A p8.png image should be 160 x 205. Is the supplied file valid?");
+            throw new P8ExtractException($"incorrect image dimensions ({bitmap.Width} x {bitmap.Height}). A p8.png image should be 160 x 205. Is the supplied file valid?");
         }
 
         SKColor[] pixels = bitmap.Pixels;
@@ -301,5 +333,22 @@ class P8Color
             15 => SKColor.Parse("FFCCAA"),
             _ => SKColor.Parse("000000"),
         };
+    }
+}
+
+public class P8ExtractException : Exception
+{
+    public P8ExtractException()
+    {
+    }
+
+    public P8ExtractException(string message)
+        : base(message)
+    {
+    }
+
+    public P8ExtractException(string message, Exception inner)
+        : base(message, inner)
+    {
     }
 }
