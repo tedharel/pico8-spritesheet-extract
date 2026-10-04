@@ -34,6 +34,10 @@ class Program
             Commands:
                 spritesheet <input_file> <output_file.png>
                 sprites <input_file> <output_folder>
+            
+            Options:
+                -i, --ignore-shared
+                            Don't include the shared map/spritesheet data
             """);
 
             return 1;
@@ -45,7 +49,7 @@ class Program
     static void Spritesheet(Config config)
     {
         P8GfxData gfxData = new(config.input_path, config.input_extension);
-        SKBitmap bitmap = gfxData.ToBitmap();
+        SKBitmap bitmap = gfxData.ToBitmap(config.ignore_shared);
 
         Trace.Assert(config.output_path != null, "Output path should be set by Config()");
 
@@ -77,13 +81,13 @@ class Program
     static void Sprites(Config config)
     {
         P8GfxData gfxData = new(config.input_path, config.input_extension);
-        SKBitmap bitmap = gfxData.ToBitmap();
+        SKBitmap bitmap = gfxData.ToBitmap(config.ignore_shared);
 
         Trace.Assert(config.output_path != null, "Output path should be set by Config()");
 
         SKBitmap sprite = new(8, 8, bitmap.ColorType, bitmap.AlphaType);
 
-        for (int i = 0; i < 256; i++)
+        for (int i = 0; i < (config.ignore_shared ? 128 : 256); i++)
         {
             int y = (i / 16) * 8;
             int x = (i % 16) * 8;
@@ -134,9 +138,12 @@ class Config
     public readonly ExtractCommand command;
 
     public readonly string? output_path;
+    public bool ignore_shared = false;
 
     public Config(string[] args)
     {
+        args = ParseAndRemoveOptions(args);
+
         if (args.Length < 1)
         {
             throw new P8ExtractException("no arguments specified");
@@ -162,6 +169,32 @@ class Config
                 output_path = ParseSpritesArguments(remaining);
                 break;
         }
+    }
+
+    string[] ParseAndRemoveOptions(string[] args)
+    {
+        List<string> normal_args = [];
+
+        foreach (string argument in args)
+        {
+            if (!argument.StartsWith('-'))
+            {
+                normal_args.Add(argument);
+                continue;
+            }
+
+            switch (argument)
+            {
+                case "-i":
+                case "--ignore-shared":
+                    ignore_shared = true;
+                    break;
+                default:
+                    throw new P8ExtractException($"unknown option '{argument}'");
+            }
+        }
+
+        return [.. normal_args];
     }
 
     static (string, P8Extension) ParseInputFilePath(string path)
@@ -379,11 +412,13 @@ class P8GfxData
         return [.. compressedData.Take(0x2000)];
     }
 
-    public SKBitmap ToBitmap()
+    public SKBitmap ToBitmap(bool ignore_shared)
     {
-        SKBitmap bitmap = new(128, 128, SKColorType.Rgb888x, SKAlphaType.Opaque);
+        int height = ignore_shared ? 64 : 128;
 
-        for (int y = 0; y < 128; y++)
+        SKBitmap bitmap = new(128, height, SKColorType.Rgb888x, SKAlphaType.Opaque);
+
+        for (int y = 0; y < height; y++)
         {
             for (int x = 0; x < 128; x++)
             {
