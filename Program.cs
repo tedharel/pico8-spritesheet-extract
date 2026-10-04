@@ -39,7 +39,8 @@ class Program
                 -i, --ignore-shared
                             Don't include the shared map/spritesheet data
                 -t, --transparent-background
-                            Replace black pixels in the spritesheet with transparent ones, similar to how spr() works by default
+                            Replace black pixels in the spritesheet with transparent ones,
+                            similar to how spr() works by default
             """);
 
             return 1;
@@ -188,18 +189,13 @@ class Config
                 continue;
             }
 
-            switch (argument)
+            if (argument.StartsWith("--"))
             {
-                case "-i":
-                case "--ignore-shared":
-                    options.ignore_shared = true;
-                    break;
-                case "-t":
-                case "--transparent-background":
-                    options.transparent_background = true;
-                    break;
-                default:
-                    throw new P8ExtractException($"unknown option '{argument}'");
+                options.ParseLongOption(argument);
+            }
+            else
+            {
+                options.ParseShortOptions(argument);
             }
         }
 
@@ -313,6 +309,41 @@ struct Options
 
     public Options()
     {
+    }
+
+    public void ParseLongOption(string longOption)
+    {
+        switch (longOption)
+        {
+            case "--ignore-shared":
+                ignore_shared = true;
+                break;
+            case "--transparent-background":
+                transparent_background = true;
+                break;
+            default:
+                throw new P8ExtractException($"unknown option '{longOption}'");
+        }
+    }
+
+    public void ParseShortOptions(string shortOptions)
+    {
+        shortOptions = shortOptions[1..];
+
+        foreach (char flag in shortOptions)
+        {
+            switch (flag)
+            {
+                case 'i':
+                    ignore_shared = true;
+                    break;
+                case 't':
+                    transparent_background = true;
+                    break;
+                default:
+                    throw new P8ExtractException($"unknown option '-{flag}'");
+            }
+        }
     }
 }
 
