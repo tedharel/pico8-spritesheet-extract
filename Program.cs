@@ -29,11 +29,11 @@ class Program
             Console.WriteLine($"""
             {red}Error: {exception.Message}{reset}
 
-            usage: p8-extract <input_file> <command> [options]
+            Usage: p8-extract <command> [options]
 
-            commands:
-                - spritesheet <output_file.png>
-                - sprites <output_folder>
+            Commands:
+                spritesheet <input_file> <output_file.png>
+                sprites <input_file> <output_folder>
             """);
 
             return 1;
@@ -142,14 +142,14 @@ class Config
             throw new P8ExtractException("no arguments specified");
         }
 
-        (input_path, input_extension) = ParseInputFilePath(args[0]);
+        command = ParseCommand(args[0]);
 
         if (args.Length < 2)
         {
-            throw new P8ExtractException("command not specified");
+            throw new P8ExtractException("input file not specified");
         }
 
-        command = ParseCommand(args[1]);
+        (input_path, input_extension) = ParseInputFilePath(args[1]);
 
         string[] remaining = args[2..];
 
