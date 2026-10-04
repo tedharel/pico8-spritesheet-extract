@@ -38,6 +38,8 @@ class Program
             Options:
                 -i, --ignore-shared
                             Don't include the shared map/spritesheet data
+                -t, --transparent-background
+                            Replace black pixels in the spritesheet with transparent ones, similar to how spr() works by default
             """);
 
             return 1;
@@ -49,7 +51,7 @@ class Program
     static void Spritesheet(Config config)
     {
         P8GfxData gfxData = new(config.input_path, config.input_extension);
-        SKBitmap bitmap = gfxData.ToBitmap(config.ignore_shared);
+        SKBitmap bitmap = gfxData.ToBitmap(config.options);
 
         Trace.Assert(config.output_path != null, "Output path should be set by Config()");
 
@@ -81,13 +83,15 @@ class Program
     static void Sprites(Config config)
     {
         P8GfxData gfxData = new(config.input_path, config.input_extension);
-        SKBitmap bitmap = gfxData.ToBitmap(config.ignore_shared);
+        SKBitmap bitmap = gfxData.ToBitmap(config.options);
 
         Trace.Assert(config.output_path != null, "Output path should be set by Config()");
 
         SKBitmap sprite = new(8, 8, bitmap.ColorType, bitmap.AlphaType);
 
-        for (int i = 0; i < (config.ignore_shared ? 128 : 256); i++)
+        int spritesCount = config.options.ignore_shared ? 128 : 256;
+
+        for (int i = 0; i < spritesCount; i++)
         {
             int y = (i / 16) * 8;
             int x = (i % 16) * 8;
@@ -138,11 +142,11 @@ class Config
     public readonly ExtractCommand command;
 
     public readonly string? output_path;
-    public bool ignore_shared = false;
+    public readonly Options options;
 
     public Config(string[] args)
     {
-        args = ParseAndRemoveOptions(args);
+        (args, options) = ParseAndRemoveOptions(args);
 
         if (args.Length < 1)
         {
@@ -171,8 +175,9 @@ class Config
         }
     }
 
-    string[] ParseAndRemoveOptions(string[] args)
+    static (string[], Options) ParseAndRemoveOptions(string[] args)
     {
+        Options options = new();
         List<string> normal_args = [];
 
         foreach (string argument in args)
@@ -187,14 +192,18 @@ class Config
             {
                 case "-i":
                 case "--ignore-shared":
-                    ignore_shared = true;
+                    options.ignore_shared = true;
+                    break;
+                case "-t":
+                case "--transparent-background":
+                    options.transparent_background = true;
                     break;
                 default:
                     throw new P8ExtractException($"unknown option '{argument}'");
             }
         }
 
-        return [.. normal_args];
+        return ([.. normal_args], options);
     }
 
     static (string, P8Extension) ParseInputFilePath(string path)
@@ -294,6 +303,16 @@ class Config
     {
         SpriteSheet,
         Sprites,
+    }
+}
+
+struct Options
+{
+    public bool ignore_shared = false;
+    public bool transparent_background = false;
+
+    public Options()
+    {
     }
 }
 
@@ -412,11 +431,11 @@ class P8GfxData
         return [.. compressedData.Take(0x2000)];
     }
 
-    public SKBitmap ToBitmap(bool ignore_shared)
+    public SKBitmap ToBitmap(Options options)
     {
-        int height = ignore_shared ? 64 : 128;
+        int height = options.ignore_shared ? 64 : 128;
 
-        SKBitmap bitmap = new(128, height, SKColorType.Rgb888x, SKAlphaType.Opaque);
+        SKBitmap bitmap = new(128, height, SKColorType.Rgba8888, SKAlphaType.Premul);
 
         for (int y = 0; y < height; y++)
         {
@@ -432,6 +451,12 @@ class P8GfxData
                     colorVal = (data[(y * 128 + x - 1) / 2] >> 4) & 0xF;
                 }
 
+                if (options.transparent_background && colorVal == 0)
+                {
+                    bitmap.SetPixel(x, y, new SKColor(0, 0, 0, 0));
+                    continue;
+                }
+
                 bitmap.SetPixel(x, y, new P8Color(colorVal).Color);
             }
         }
@@ -440,32 +465,27 @@ class P8GfxData
     }
 }
 
-class P8Color
+readonly struct P8Color(int val)
 {
-    public readonly SKColor Color;
-
-    public P8Color(int val)
+    public readonly SKColor Color = val switch
     {
-        Color = val switch
-        {
-            1 => SKColor.Parse("1D2B53"),
-            2 => SKColor.Parse("7E2553"),
-            3 => SKColor.Parse("008751"),
-            4 => SKColor.Parse("AB5236"),
-            5 => SKColor.Parse("5F574F"),
-            6 => SKColor.Parse("C2C3C7"),
-            7 => SKColor.Parse("FFF1E8"),
-            8 => SKColor.Parse("FF004D"),
-            9 => SKColor.Parse("FFA300"),
-            10 => SKColor.Parse("FFEC27"),
-            11 => SKColor.Parse("00E436"),
-            12 => SKColor.Parse("29ADFF"),
-            13 => SKColor.Parse("83769C"),
-            14 => SKColor.Parse("FF77A8"),
-            15 => SKColor.Parse("FFCCAA"),
-            _ => SKColor.Parse("000000"),
-        };
-    }
+        1 => SKColor.Parse("1D2B53"),
+        2 => SKColor.Parse("7E2553"),
+        3 => SKColor.Parse("008751"),
+        4 => SKColor.Parse("AB5236"),
+        5 => SKColor.Parse("5F574F"),
+        6 => SKColor.Parse("C2C3C7"),
+        7 => SKColor.Parse("FFF1E8"),
+        8 => SKColor.Parse("FF004D"),
+        9 => SKColor.Parse("FFA300"),
+        10 => SKColor.Parse("FFEC27"),
+        11 => SKColor.Parse("00E436"),
+        12 => SKColor.Parse("29ADFF"),
+        13 => SKColor.Parse("83769C"),
+        14 => SKColor.Parse("FF77A8"),
+        15 => SKColor.Parse("FFCCAA"),
+        _ => SKColor.Parse("000000"),
+    };
 }
 
 public class P8ExtractException : Exception
