@@ -5,7 +5,7 @@ namespace P8Extract;
 
 class Program
 {
-    static void Main(string[] args)
+    static int Main(string[] args)
     {
         try
         {
@@ -35,7 +35,11 @@ class Program
                 - spritesheet <output_file.png>
                 - sprites <output_folder>
             """);
+
+            return 1;
         }
+
+        return 0;
     }
 
     static void Spritesheet(Config config)
@@ -89,8 +93,6 @@ class Program
 
                 if (!success)
                 {
-                    Console.WriteLine($"{i}: ({x}, {y}) - ({x + 7}, {y + 7})");
-                    Console.WriteLine(new SKRectI(x, y, x + 7, y + 7));
                     throw new P8ExtractException($"failed to extract sprite {i} from spritesheet");
                 }
             }
@@ -346,7 +348,15 @@ class P8GfxData
 
     static byte[] P8PngReadGfxData(string path)
     {
-        SKBitmap bitmap = SKBitmap.Decode(path) ?? throw new P8ExtractException($"failed to read input file '{path}'");
+        SKFileStream stream = new(path);
+        SKCodec codec = SKCodec.Create(stream) ?? throw new P8ExtractException($"failed to read input file '{path}'");
+        SKBitmap bitmap = new(codec.Info);
+        SKCodecResult result = codec.GetPixels(bitmap.Info, bitmap.GetPixels());
+
+        if (result != SKCodecResult.Success)
+        {
+            throw new P8ExtractException($"failed to read input file '{path}'. Failed with error '{result}'");
+        }
 
         if (!(bitmap.Width == 160 && bitmap.Height == 205))
         {
@@ -359,10 +369,10 @@ class P8GfxData
         for (int i = 0; i < compressedData.Length; i++)
         {
             compressedData[i] = (byte)(
-                (pixels[i].Red & 0b11) << 6 |
-                (pixels[i].Green & 0b11) << 4 |
-                (pixels[i].Blue & 0b11) << 2 |
-                (pixels[i].Alpha & 0b11) << 0
+                (pixels[i].Alpha & 0b11) << 6 |
+                (pixels[i].Red & 0b11) << 4 |
+                (pixels[i].Green & 0b11) << 2 |
+                (pixels[i].Blue & 0b11) << 0
             );
         }
 
