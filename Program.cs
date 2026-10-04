@@ -11,7 +11,7 @@ class Program
         {
             Config config = new(args);
 
-            switch (config.command)
+            switch (config.Command)
             {
                 case Config.ExtractCommand.SpriteSheet:
                     Spritesheet(config);
@@ -51,14 +51,14 @@ class Program
 
     static void Spritesheet(Config config)
     {
-        P8GfxData gfxData = new(config.input_path, config.input_extension);
-        SKBitmap bitmap = gfxData.ToBitmap(config.options);
+        P8GfxData gfxData = new(config.InputPath, config.InputExtension);
+        SKBitmap bitmap = gfxData.ToBitmap(config.Options);
 
-        Trace.Assert(config.output_path != null, "Output path should be set by Config()");
+        Trace.Assert(config.OutputPath != null, "Output path should be set by Config()");
 
         try
         {
-            using (FileStream stream = new(config.output_path, FileMode.Create, FileAccess.Write))
+            using (FileStream stream = new(config.OutputPath, FileMode.Create, FileAccess.Write))
             {
                 bool success = bitmap.Encode(stream, SKEncodedImageFormat.Png, 0);
 
@@ -76,27 +76,27 @@ class Program
             }
             else
             {
-                throw new P8ExtractException($"failed to save spritesheet to '{config.output_path}', caused by: {exception.Message}");
+                throw new P8ExtractException($"failed to save spritesheet to '{config.OutputPath}', caused by: {exception.Message}");
             }
         }
     }
 
     static void Sprites(Config config)
     {
-        P8GfxData gfxData = new(config.input_path, config.input_extension);
-        SKBitmap bitmap = gfxData.ToBitmap(config.options);
+        P8GfxData gfxData = new(config.InputPath, config.InputExtension);
+        SKBitmap bitmap = gfxData.ToBitmap(config.Options);
 
-        Trace.Assert(config.output_path != null, "Output path should be set by Config()");
+        Trace.Assert(config.OutputPath != null, "Output path should be set by Config()");
 
         SKBitmap sprite = new(8, 8, bitmap.ColorType, bitmap.AlphaType);
 
-        int spritesCount = config.options.ignore_shared ? 128 : 256;
+        int spritesCount = config.Options.IgnoreShared ? 128 : 256;
 
         for (int i = 0; i < spritesCount; i++)
         {
             int y = (i / 16) * 8;
             int x = (i % 16) * 8;
-            
+
             {
                 bool success = bitmap.ExtractSubset(sprite, new SKRectI(x, y, x + 8, y + 8));
 
@@ -106,7 +106,7 @@ class Program
                 }
             }
 
-            string path = Path.Join(config.output_path, $"{i}.png");
+            string path = Path.Join(config.OutputPath, $"{i}.png");
 
             try
             {
@@ -138,40 +138,40 @@ class Program
 
 class Config
 {
-    public readonly string input_path;
-    public readonly P8Extension input_extension;
-    public readonly ExtractCommand command;
+    public readonly string InputPath;
+    public readonly P8Extension InputExtension;
+    public readonly ExtractCommand Command;
 
-    public readonly string? output_path;
-    public readonly Options options;
+    public readonly string? OutputPath;
+    public readonly Options Options;
 
     public Config(string[] args)
     {
-        (args, options) = ParseAndRemoveOptions(args);
+        (args, Options) = ParseAndRemoveOptions(args);
 
         if (args.Length < 1)
         {
             throw new P8ExtractException("no arguments specified");
         }
 
-        command = ParseCommand(args[0]);
+        Command = ParseCommand(args[0]);
 
         if (args.Length < 2)
         {
             throw new P8ExtractException("input file not specified");
         }
 
-        (input_path, input_extension) = ParseInputFilePath(args[1]);
+        (InputPath, InputExtension) = ParseInputFilePath(args[1]);
 
         string[] remaining = args[2..];
 
-        switch (command)
+        switch (Command)
         {
             case ExtractCommand.SpriteSheet:
-                output_path = ParseSpritesheetArguments(remaining);
+                OutputPath = ParseSpritesheetArguments(remaining);
                 break;
             case ExtractCommand.Sprites:
-                output_path = ParseSpritesArguments(remaining);
+                OutputPath = ParseSpritesArguments(remaining);
                 break;
         }
     }
@@ -179,13 +179,13 @@ class Config
     static (string[], Options) ParseAndRemoveOptions(string[] args)
     {
         Options options = new();
-        List<string> normal_args = [];
+        List<string> normalArgs = [];
 
         foreach (string argument in args)
         {
             if (!argument.StartsWith('-'))
             {
-                normal_args.Add(argument);
+                normalArgs.Add(argument);
                 continue;
             }
 
@@ -199,7 +199,7 @@ class Config
             }
         }
 
-        return ([.. normal_args], options);
+        return ([.. normalArgs], options);
     }
 
     static (string, P8Extension) ParseInputFilePath(string path)
@@ -304,8 +304,8 @@ class Config
 
 struct Options
 {
-    public bool ignore_shared = false;
-    public bool transparent_background = false;
+    public bool IgnoreShared = false;
+    public bool TransparentBackground = false;
 
     public Options()
     {
@@ -316,10 +316,10 @@ struct Options
         switch (longOption)
         {
             case "--ignore-shared":
-                ignore_shared = true;
+                IgnoreShared = true;
                 break;
             case "--transparent-background":
-                transparent_background = true;
+                TransparentBackground = true;
                 break;
             default:
                 throw new P8ExtractException($"unknown option '{longOption}'");
@@ -335,10 +335,10 @@ struct Options
             switch (flag)
             {
                 case 'i':
-                    ignore_shared = true;
+                    IgnoreShared = true;
                     break;
                 case 't':
-                    transparent_background = true;
+                    TransparentBackground = true;
                     break;
                 default:
                     throw new P8ExtractException($"unknown option '-{flag}'");
@@ -349,11 +349,11 @@ struct Options
 
 class P8GfxData
 {
-    public byte[] data;
+    public byte[] Data;
 
     public P8GfxData(string path, Config.P8Extension extension)
     {
-        data = extension switch
+        Data = extension switch
         {
             Config.P8Extension.P8 => P8ReadGfxData(path),
             Config.P8Extension.P8Png => P8PngReadGfxData(path),
@@ -464,7 +464,7 @@ class P8GfxData
 
     public SKBitmap ToBitmap(Options options)
     {
-        int height = options.ignore_shared ? 64 : 128;
+        int height = options.IgnoreShared ? 64 : 128;
 
         SKBitmap bitmap = new(128, height, SKColorType.Rgba8888, SKAlphaType.Premul);
 
@@ -475,14 +475,14 @@ class P8GfxData
                 int colorVal;
                 if (x % 2 == 0)
                 {
-                    colorVal = data[(y * 128 + x) / 2] & 0xF;
+                    colorVal = Data[(y * 128 + x) / 2] & 0xF;
                 }
                 else
                 {
-                    colorVal = (data[(y * 128 + x - 1) / 2] >> 4) & 0xF;
+                    colorVal = (Data[(y * 128 + x - 1) / 2] >> 4) & 0xF;
                 }
 
-                if (options.transparent_background && colorVal == 0)
+                if (options.TransparentBackground && colorVal == 0)
                 {
                     bitmap.SetPixel(x, y, new SKColor(0, 0, 0, 0));
                     continue;
