@@ -19,6 +19,9 @@ class Program
                 case Config.ExtractCommand.Sprites:
                     Sprites(config);
                     break;
+                case Config.ExtractCommand.Map:
+                    Map(config);
+                    break;
             }
         }
         catch (P8ExtractException exception)
@@ -34,6 +37,7 @@ class Program
             Commands:
                 spritesheet <input_file> <output_file.png>
                 sprites <input_file> <output_folder>
+                map <input_file> <output_file.csv>
             
             Options:
                 -i, --ignore-shared
@@ -41,6 +45,8 @@ class Program
                 -t, --transparent-background
                             Replace black pixels in the spritesheet with transparent ones,
                             similar to how spr() works by default
+                -f, --flatten-map
+                            Outputs map data as one long list, instead of a 2d list
             """);
 
             return 1;
@@ -134,6 +140,35 @@ class Program
         }
 
     }
+
+    static void Map(Config config)
+    {
+        P8MapData mapData = new(config.InputPath, config.InputExtension);
+
+        Trace.Assert(config.OutputPath != null, "Output path should be set by Config()");
+        
+        int length = config.Options.IgnoreShared ? mapData.Data.Length / 2 : mapData.Data.Length;
+        string output;
+
+        if (config.Options.FlattenMap)
+        {
+            output = string.Join("\n", mapData.Data.Take(length));
+        }
+        else
+        {
+            string[] lines = [.. mapData.Data.Take(length).Chunk(128).Select(line => string.Join(",", line))];
+            output = string.Join("\n", lines);
+        }
+        
+        try
+        {
+            File.WriteAllText(config.OutputPath, output);
+        }
+        catch (Exception exception)
+        {
+            throw new P8ExtractException($"failed to save map to '{config.OutputPath}', caused by: {exception.Message}");
+        }
+    }
 }
 
 class Config
@@ -172,6 +207,9 @@ class Config
                 break;
             case ExtractCommand.Sprites:
                 OutputPath = ParseSpritesArguments(remaining);
+                break;
+            case ExtractCommand.Map:
+                OutputPath = ParseMapArguments(remaining);
                 break;
         }
     }
@@ -237,6 +275,7 @@ class Config
         {
             "spritesheet" => ExtractCommand.SpriteSheet,
             "sprites" => ExtractCommand.Sprites,
+            "map" => ExtractCommand.Map,
             _ => throw new P8ExtractException($"invalid command '{command}'"),
         };
     }
@@ -289,6 +328,30 @@ class Config
         return args[0];
     }
 
+    static string ParseMapArguments(string[] args)
+    {
+        if (args.Length < 1)
+        {
+            throw new P8ExtractException("<output_file.csv> not specified");
+        }
+
+        try
+        {
+            FileInfo _ = new(args[0]);
+        }
+        catch (Exception exception)
+        {
+            throw new P8ExtractException($"invalid output file path, caused by: {exception.Message}");
+        }
+
+        if (Path.GetExtension(args[0]) != ".csv")
+        {
+            throw new P8ExtractException($"invalid output file extension '{Path.GetExtension(args[0])}'. This should be '.csv'");
+        }
+
+        return args[0];
+    }
+
     public enum P8Extension
     {
         P8,
@@ -299,6 +362,7 @@ class Config
     {
         SpriteSheet,
         Sprites,
+        Map,
     }
 }
 
@@ -306,6 +370,7 @@ struct Options
 {
     public bool IgnoreShared = false;
     public bool TransparentBackground = false;
+    public bool FlattenMap = false;
 
     public Options()
     {
@@ -320,6 +385,9 @@ struct Options
                 break;
             case "--transparent-background":
                 TransparentBackground = true;
+                break;
+            case "--flatten-map":
+                FlattenMap = true;
                 break;
             default:
                 throw new P8ExtractException($"unknown option '{longOption}'");
@@ -340,6 +408,9 @@ struct Options
                 case 't':
                     TransparentBackground = true;
                     break;
+                case 'f':
+                    FlattenMap = true;
+                    break;
                 default:
                     throw new P8ExtractException($"unknown option '-{flag}'");
             }
@@ -347,24 +418,11 @@ struct Options
     }
 }
 
-class P8GfxData
+class P8Data
 {
-    public byte[] Data;
-
-    public P8GfxData(string path, Config.P8Extension extension)
-    {
-        Data = extension switch
-        {
-            Config.P8Extension.P8 => P8ReadGfxData(path),
-            Config.P8Extension.P8Png => P8PngReadGfxData(path),
-            _ => throw new UnreachableException()
-        };
-    }
-
-    static byte[] P8ReadGfxData(string path)
+    public static string[] P8GetSection(string path, string label, int length)
     {
         string[] lines;
-
         try
         {
             lines = File.ReadAllLines(path);
@@ -373,63 +431,18 @@ class P8GfxData
         {
             throw new P8ExtractException($"failed to read input file '{path}', caused by: {exception.Message}");
         }
+        
+        int dataStart = Array.IndexOf(lines, label);
 
-        string[] gfxLines = GfxLinesFromP8Lines(lines);
-        return GfxDataFromLines(gfxLines);
-    }
-
-    static string[] GfxLinesFromP8Lines(string[] lines)
-    {
-        int gfxDataStart = Array.IndexOf(lines, "__gfx__");
-
-        if (gfxDataStart == -1)
+        if (dataStart == -1)
         {
-            throw new P8ExtractException("couldn't find gfx data section. Is the supplied file valid?");
+            throw new P8ExtractException($"couldn't find section '{label}'. Is the supplied file valid?");
         }
 
-        return [.. lines.Skip(gfxDataStart + 1).Take(128)];
+        return [.. lines.Skip(dataStart + 1).Take(length)];
     }
 
-    static byte[] GfxDataFromLines(string[] lines)
-    {
-        string gfxString = string.Join("", lines);
-
-        if (gfxString.Length != 128 * 128)
-        {
-            throw new P8ExtractException($"Incorrect amount of GFX data ({gfxString.Length}). Should be {128 * 128}. Is the supplied file valid?");
-        }
-
-        byte[] gfxData = new byte[gfxString.Length / 2];
-
-        for (int i = 0; i < gfxData.Length; i++)
-        {
-            gfxData[i] = (byte)(
-                GfxHexToInt(gfxString[i * 2]) |
-                (GfxHexToInt(gfxString[i * 2 + 1]) << 4)
-            );
-        }
-
-        return gfxData;
-    }
-
-    static int GfxHexToInt(char hex)
-    {
-        if
-        (!(
-            hex >= '0' && hex <= '9' ||
-            hex >= 'A' && hex <= 'F' ||
-            hex >= 'a' && hex <= 'f'
-        ))
-        {
-            return 0; // See p8 file format
-        }
-
-        int val = hex;
-
-        return val - (val < 'A' ? '0' : (val < 'a' ? ('A' - 10) : ('a' - 10)));
-    }
-
-    static byte[] P8PngReadGfxData(string path)
+    public static byte[] P8PngGetCompressedData(string path)
     {
         SKFileStream stream = new(path);
         SKCodec codec = SKCodec.Create(stream) ?? throw new P8ExtractException($"failed to read input file '{path}'");
@@ -459,6 +472,63 @@ class P8GfxData
             );
         }
 
+        return compressedData;
+    }
+
+    public static int HexToInt(char hex)
+    {
+        if
+        (!(
+            hex >= '0' && hex <= '9' ||
+            hex >= 'A' && hex <= 'F' ||
+            hex >= 'a' && hex <= 'f'
+        ))
+        {
+            return 0; // See p8 file format
+        }
+
+        int val = hex;
+
+        return val - (val < 'A' ? '0' : (val < 'a' ? ('A' - 10) : ('a' - 10)));
+    }
+
+}
+
+class P8GfxData(string path, Config.P8Extension extension) : P8Data
+{
+    public byte[] Data = extension switch
+    {
+        Config.P8Extension.P8 => P8ReadGfxData(path),
+        Config.P8Extension.P8Png => P8PngReadGfxData(path),
+        _ => throw new UnreachableException()
+    };
+
+    static byte[] P8ReadGfxData(string path)
+    {
+        string[] gfxLines = P8GetSection(path, "__gfx__", 128);
+        string gfxString = string.Join("", gfxLines);
+
+        if (gfxString.Length != 128 * 128)
+        {
+            throw new P8ExtractException($"Incorrect amount of GFX data ({gfxString.Length}). Should be {128 * 128}. Is the supplied file valid?");
+        }
+
+        byte[] gfxData = new byte[gfxString.Length / 2];
+
+        for (int i = 0; i < gfxData.Length; i++)
+        {
+            gfxData[i] = (byte)(
+                HexToInt(gfxString[i * 2]) |
+                (HexToInt(gfxString[i * 2 + 1]) << 4)
+            );
+        }
+
+        return gfxData;
+    }
+
+    static byte[] P8PngReadGfxData(string path)
+    {
+        byte[] compressedData = P8PngGetCompressedData(path);
         return [.. compressedData.Take(0x2000)];
     }
 
@@ -493,6 +563,67 @@ class P8GfxData
         }
 
         return bitmap;
+    }
+}
+
+class P8MapData(string path, Config.P8Extension extension) : P8Data
+{
+    public byte[] Data = extension switch
+    {
+        Config.P8Extension.P8 => P8ReadMapData(path),
+        Config.P8Extension.P8Png => P8PngReadMapData(path),
+        _ => throw new UnreachableException()
+    };
+    
+    static byte[] P8ReadMapData(string path)
+    {
+        string[] topMapLines = P8GetSection(path, "__map__", 32);
+        string topMapString = string.Join("", topMapLines);
+        
+        if (topMapString.Length != 32 * 256)
+        {
+            throw new P8ExtractException($"Incorrect amount of MAP data ({topMapString.Length}). Should be {32 * 256}. Is the supplied file valid?");
+        }
+        
+        byte[] topMapData = new byte[topMapString.Length / 2];
+
+        for (int i = 0; i < topMapData.Length; i++)
+        {
+            topMapData[i] = (byte)(
+                (HexToInt(topMapString[i * 2]) << 4) |
+                HexToInt(topMapString[i * 2 + 1])
+            );
+        }
+
+        string[] gfxLines = P8GetSection(path, "__gfx__", 128);
+        string[] bottomMapLines = [.. gfxLines.Skip(64).Take(64)];
+        string bottomMapString = string.Join("", bottomMapLines);
+        
+        if (bottomMapString.Length != 128 * 64)
+        {
+            throw new P8ExtractException($"Incorrect amount of shared GFX data ({bottomMapString.Length}). Should be {128 * 64}. Is the supplied file valid?");
+        }
+        
+        byte[] bottomMapData = new byte[bottomMapString.Length / 2];
+
+        for (int i = 0; i < bottomMapData.Length; i++)
+        {
+            bottomMapData[i] = (byte)(
+                (HexToInt(bottomMapString[i * 2]) << 4) |
+                HexToInt(bottomMapString[i * 2 + 1])
+            );
+        }
+
+        return [.. topMapData, .. bottomMapData];
+    }
+
+    static byte[] P8PngReadMapData(string path)
+    {
+        byte[] compressedData = P8PngGetCompressedData(path);
+        return [
+            .. compressedData.Skip(0x2000).Take(0x1000),
+            .. compressedData.Skip(0x1000).Take(0x1000)
+        ];
     }
 }
 
