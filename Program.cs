@@ -156,7 +156,7 @@ class Program
         }
         else
         {
-            string[] lines = [.. mapData.Data.Take(length).Chunk(128).Select(line => string.Join(",", line))];
+            string[] lines = [.. mapData.Data.Take(length).Chunk(128).Select(line => string.Join("\t", line))];
             output = string.Join("\n", lines);
         }
         
@@ -609,8 +609,8 @@ class P8MapData(string path, Config.P8Extension extension) : P8Data
         for (int i = 0; i < bottomMapData.Length; i++)
         {
             bottomMapData[i] = (byte)(
-                (HexToInt(bottomMapString[i * 2]) << 4) |
-                HexToInt(bottomMapString[i * 2 + 1])
+                HexToInt(bottomMapString[i * 2]) |
+                (HexToInt(bottomMapString[i * 2 + 1]) << 4)
             );
         }
 
