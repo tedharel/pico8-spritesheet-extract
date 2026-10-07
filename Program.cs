@@ -22,6 +22,9 @@ class Program
                 case Config.ExtractCommand.Map:
                     Map(config);
                     break;
+                case Config.ExtractCommand.Flags:
+                    Flags(config);
+                    break;
             }
         }
         catch (P8ExtractException exception)
@@ -38,6 +41,7 @@ class Program
                 spritesheet <input_file> <output_file.png>
                 sprites <input_file> <output_folder>
                 map <input_file> <output_file.csv>
+                flags <input_file> <output_file.csv>
             
             Options:
                 -i, --ignore-shared
@@ -45,8 +49,10 @@ class Program
                 -t, --transparent-background
                             Replace black pixels in the spritesheet with transparent ones,
                             similar to how spr() works by default
-                -f, --flatten-map
-                            Outputs map data as one long list, instead of a 2d list
+                -f, --flatten
+                            Outputs map/flags data as one long list, instead of a 2d list
+                -b, --byte-flags
+                            Outputs sprite flags as bytes, instead of individual bits
             """);
 
             return 1;
@@ -150,7 +156,7 @@ class Program
         int length = config.Options.IgnoreShared ? mapData.Data.Length / 2 : mapData.Data.Length;
         string output;
 
-        if (config.Options.FlattenMap)
+        if (config.Options.Flatten)
         {
             output = string.Join("\n", mapData.Data.Take(length));
         }
@@ -168,6 +174,49 @@ class Program
         {
             throw new P8ExtractException($"failed to save map to '{config.OutputPath}', caused by: {exception.Message}");
         }
+    }
+
+    static void Flags(Config config)
+    {
+        P8SpriteFlagsData flagsData = new(config.InputPath, config.InputExtension);
+
+        Trace.Assert(config.OutputPath != null, "Output path should be set by Config()");
+
+        string output;
+
+        if (config.Options.ByteFlags)
+        {
+            output = string.Join("\n", flagsData.Data);
+        }
+        else
+        {
+            var flagsBits = flagsData.Data.Select(b => Enumerable.Range(0, 8).Select(i => Convert.ToByte(GetFlag(b, i))));
+
+            if (config.Options.Flatten)
+            {
+                output = string.Join("\n", flagsBits.SelectMany(x => x));
+            }
+            else
+            {
+                output = string.Join("\n", flagsBits.Select(flags => string.Join("\t", flags)));
+            }
+        }
+        
+        try
+        {
+            File.WriteAllText(config.OutputPath, output);
+        }
+        catch (Exception exception)
+        {
+            throw new P8ExtractException($"failed to save sprite flags to '{config.OutputPath}', caused by: {exception.Message}");
+        }
+    }
+
+    
+
+    static bool GetFlag(byte b, int i)
+    {
+        return ((b >> i) & 1) != 0;
     }
 }
 
@@ -210,6 +259,9 @@ class Config
                 break;
             case ExtractCommand.Map:
                 OutputPath = ParseMapArguments(remaining);
+                break;
+            case ExtractCommand.Flags:
+                OutputPath = ParseFlagsArguments(remaining);
                 break;
         }
     }
@@ -276,6 +328,7 @@ class Config
             "spritesheet" => ExtractCommand.SpriteSheet,
             "sprites" => ExtractCommand.Sprites,
             "map" => ExtractCommand.Map,
+            "flags" => ExtractCommand.Flags,
             _ => throw new P8ExtractException($"invalid command '{command}'"),
         };
     }
@@ -352,6 +405,30 @@ class Config
         return args[0];
     }
 
+    static string ParseFlagsArguments(string[] args)
+    {
+        if (args.Length < 1)
+        {
+            throw new P8ExtractException("<output_file.csv> not specified");
+        }
+
+        try
+        {
+            FileInfo _ = new(args[0]);
+        }
+        catch (Exception exception)
+        {
+            throw new P8ExtractException($"invalid output file path, caused by: {exception.Message}");
+        }
+
+        if (Path.GetExtension(args[0]) != ".csv")
+        {
+            throw new P8ExtractException($"invalid output file extension '{Path.GetExtension(args[0])}'. This should be '.csv'");
+        }
+
+        return args[0];
+    }
+
     public enum P8Extension
     {
         P8,
@@ -363,6 +440,7 @@ class Config
         SpriteSheet,
         Sprites,
         Map,
+        Flags,
     }
 }
 
@@ -370,7 +448,8 @@ struct Options
 {
     public bool IgnoreShared = false;
     public bool TransparentBackground = false;
-    public bool FlattenMap = false;
+    public bool Flatten = false;
+    public bool ByteFlags = false;
 
     public Options()
     {
@@ -386,8 +465,11 @@ struct Options
             case "--transparent-background":
                 TransparentBackground = true;
                 break;
-            case "--flatten-map":
-                FlattenMap = true;
+            case "--flatten":
+                Flatten = true;
+                break;
+            case "--byte-flags":
+                ByteFlags = true;
                 break;
             default:
                 throw new P8ExtractException($"unknown option '{longOption}'");
@@ -409,7 +491,10 @@ struct Options
                     TransparentBackground = true;
                     break;
                 case 'f':
-                    FlattenMap = true;
+                    Flatten = true;
+                    break;
+                case 'b':
+                    ByteFlags = true;
                     break;
                 default:
                     throw new P8ExtractException($"unknown option '-{flag}'");
@@ -624,6 +709,45 @@ class P8MapData(string path, Config.P8Extension extension) : P8Data
             .. compressedData.Skip(0x2000).Take(0x1000),
             .. compressedData.Skip(0x1000).Take(0x1000)
         ];
+    }
+}
+
+class P8SpriteFlagsData(string path, Config.P8Extension extension) : P8Data
+{
+    public byte[] Data = extension switch
+    {
+        Config.P8Extension.P8 => P8ReadSpriteFlagsData(path),
+        Config.P8Extension.P8Png => P8PngReadSpriteFlagsData(path),
+        _ => throw new UnreachableException()
+    };
+
+    static byte[] P8ReadSpriteFlagsData(string path)
+    {
+        string[] spriteFlagsLines = P8GetSection(path, "__gff__", 2);
+        string spriteFlagsString = string.Join("", spriteFlagsLines);
+        
+        if (spriteFlagsString.Length != 2 * 256)
+        {
+            throw new P8ExtractException($"Incorrect amount of GFF data ({spriteFlagsString.Length}). Should be {2 * 256}. Is the supplied file valid?");
+        }
+        
+        byte[] spriteFlagsData = new byte[spriteFlagsString.Length / 2];
+
+        for (int i = 0; i < spriteFlagsData.Length; i++)
+        {
+            spriteFlagsData[i] = (byte)(
+                (HexToInt(spriteFlagsString[i * 2]) << 4) |
+                HexToInt(spriteFlagsString[i * 2 + 1])
+            );
+        }
+
+        return spriteFlagsData;
+    }
+
+    static byte[] P8PngReadSpriteFlagsData(string path)
+    {
+        byte[] compressedData = P8PngGetCompressedData(path);
+        return [.. compressedData.Skip(0x3000).Take(0x100)];
     }
 }
 
